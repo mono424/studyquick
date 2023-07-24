@@ -150,8 +150,8 @@ const localOCRPreprocess = {
 
 const bucketName = "studyquick-gpt-4-ocr";
 
-function summaryPrompt(text) {
-    return `Summarize the following pdf-extracted text in commonmark format:\n\n${text}`;
+function summaryPrompt(index, total, text) {
+    return `Summarize the following pdf-extracted text (part ${index} of ${total}) in commonmark format:\n\n${text}`;
 }
 
 function cardsPrompt(count) {
@@ -275,7 +275,7 @@ async function main(files, output, prompts, flashcardCount, preprocessor) {
             const outputCards = path.resolve(output, filename.replace(/\.pdf$/, "") + `.cards_${i}.md`);
 
             let res = prompts ? {
-                text: summaryPrompt(chunk),
+                text: summaryPrompt(i, textchunks.length, chunk),
             } : await api.sendMessage(summaryPrompt(chunk));
             fs.writeFileSync(outputSummary, res.text);
 
@@ -312,9 +312,9 @@ require('yargs')
             default: false,
         }).option('flashcards', {
             alias: 'c',
-            type: 'number',
+            type: 'string',
             description: 'number of flashcards to generate',
-            default: 25,
+            default: "25",
         })
     }, async (argv) => {
         await main(argv.files, argv.output, argv.prompts, argv.flashcards, argv.gcp ? googleOCRPreprocess : localOCRPreprocess);
