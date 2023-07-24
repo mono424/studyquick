@@ -71,7 +71,8 @@ const googleOCRPreprocess = {
        try {
         const processorId = "2de4ccbdbab25b1a";
         const name = `projects/${process.env.GOOGLE_STORAGE_PROJECT_ID}/locations/us/processors/${processorId}`;
-        const outputPrefix = `gs://${bucketName}/${filename}__ocr`;
+        const prefixName = `${filename}__ocr`;
+        const outputPrefix = `gs://${bucketName}/${prefixName}`;
 
         const request = {
             name,
@@ -99,7 +100,7 @@ const googleOCRPreprocess = {
         await operation.promise();
         console.log('Document processing complete.');
 
-        return outputPrefix;
+        return prefixName;
        } catch (error) {
         console.log(error.statusDetails, JSON.stringify(error.statusDetails));
         throw error;
@@ -140,8 +141,8 @@ function summaryPrompt(text) {
     return `Summarize the following pdf-extracted text in commonmark format:\n\n${text}`;
 }
 
-function cardsPrompt() {
-    return `Create flashcards for the summary above. Use the following format:\n\nQ: <question>\nA: <answer>\n\nQ: <question>\nA: <answer>\n\n...`;
+function cardsPrompt(count) {
+    return `Create ${count} flashcards for the summary above. Use the following format:\n\nQ: <question>\nA: <answer>\n\nQ: <question>\nA: <answer>\n\n...`;
 }
 
 function getPageText(pageNum, PDFDocumentInstance) {
@@ -227,7 +228,7 @@ function splitTextByNewline(text, chunkLen) {
     return chunks;
 }
 
-async function main(files, output, prompts, preprocessor) {
+async function main(files, output, prompts, flashcardCount, preprocessor) {
     const { ChatGPTAPI } = await import('chatgpt')
 
     const api = new ChatGPTAPI({
@@ -267,7 +268,7 @@ async function main(files, output, prompts, preprocessor) {
 
             res = prompts ? {
                 text: cardsPrompt(),
-            } : await api.sendMessage(cardsPrompt(), {
+            } : await api.sendMessage(cardsPrompt(flashcardCount), {
                 parentMessageId: res.id
             });
             fs.writeFileSync(outputCards, res.text);
@@ -296,9 +297,14 @@ require('yargs')
             type: 'boolean',
             description: 'uses gcp ocr instead of local pdf parsing',
             default: false,
+        }).option('flashcards', {
+            alias: 'c',
+            type: 'number',
+            description: 'number of flashcards to generate',
+            default: 25,
         })
     }, async (argv) => {
-        await main(argv.files, argv.output, argv.prompts, argv.gcp ? googleOCRPreprocess : localOCRPreprocess);
+        await main(argv.files, argv.output, argv.prompts, argv.flashcards, argv.gcp ? googleOCRPreprocess : localOCRPreprocess);
     })
     .strictCommands()
     .demandCommand(1)
