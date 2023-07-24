@@ -83,7 +83,7 @@ const googleOCRPreprocess = {
         const prefixName = `${filename}__ocr`;
         const outputPrefix = `gs://${bucketName}/${prefixName}`;
 
-        if (this.hasFiles(prefixName)) {
+        if (await this.hasFiles(prefixName)) {
             return prefixName;
         }
 
