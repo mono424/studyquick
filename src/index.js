@@ -1,11 +1,12 @@
 require('dotenv').config()
-const vision = require('@google-cloud/vision').v1;
+const {DocumentProcessorServiceClient} = require('@google-cloud/documentai').v1;
 const {Storage} = require('@google-cloud/storage');
 const pdf = require('pdf-parse');
 const path = require("path");
 const fs = require("fs");
 
-const client = new vision.ImageAnnotatorClient({
+const client = new DocumentProcessorServiceClient({
+    apiEndpoint: 'us-documentai.googleapis.com',
     projectId: process.env.GOOGLE_STORAGE_PROJECT_ID,
     credentials: {
       client_email: process.env.GOOGLE_STORAGE_EMAIL,
@@ -27,29 +28,86 @@ const googleOCRPreprocess = {
             console.log(`Uploading & OCR file ${file}...`);
             const absolutePath = path.resolve(file);
             const filename = path.basename(file);
-            const gsPath = `gs://${bucketName}/${filename}`;
             await uploadFile(absolutePath, filename);
             this.filesUrls.push({
-                textPath: await getText(gsPath),
+                prefix: await this.getDocumentAiText(filename),
                 filename: filename
             });
-            await deleteFile(gsPath);
+            await deleteFile(filename);
             console.log(`File OCR done.`);
         }
         console.log(`All texts are ready.`);
     },
 
     async getInfo(index) {
-        const {textPath, filename} = this.filesUrls[index];
-        return {filename, content: await getContents(textPath)};
+        const {prefix, filename} = this.filesUrls[index];
+        const query = {
+            prefix,
+        };
+
+        const [files] = await storage.bucket(bucketName).getFiles(query);
+
+        console.log("Collect files ...")
+        for (let file of files) {
+            console.log(`- ${file.name}`);
+        }
+        const fileContents = await Promise.all(
+            files.map((file) => file.download())
+        );
+
+        console.log("Delete files ...")
+        await Promise.all(
+            files.map((file) => file.delete())
+        );
+        
+        return {filename, content: fileContents.map((file) => JSON.parse(file.toString())["text"]).join("\n")};
     },
 
     length() {
         return this.filesUrls.length;
+    },
+
+    async getDocumentAiText(filename) {
+       try {
+        const processorId = "2de4ccbdbab25b1a";
+        const name = `projects/${process.env.GOOGLE_STORAGE_PROJECT_ID}/locations/us/processors/${processorId}`;
+        const outputPrefix = `gs://${bucketName}/${filename}__ocr`;
+
+        const request = {
+            name,
+            inputDocuments: {
+                gcsDocuments: {
+                documents: [
+                    {
+                        gcsUri: `gs://${bucketName}/${filename}`,
+                        mimeType: 'application/pdf',
+                    },
+                ],
+                },
+            },
+            documentOutputConfig: {
+                gcsOutputConfig: {
+                    gcsUri: outputPrefix,
+                    fieldMask: {
+                        paths: ['text', 'pages.pageNumber'],
+                    },
+                },
+            },
+        };
+
+        const [operation] = await client.batchProcessDocuments(request);
+        await operation.promise();
+        console.log('Document processing complete.');
+
+        return outputPrefix;
+       } catch (error) {
+        console.log(error.statusDetails, JSON.stringify(error.statusDetails));
+        throw error;
+       }
     }
 }
 
-const localOCR = {
+const localOCRPreprocess = {
     filesUrls: [],
     async preprocess(files) {
         for (let file of files) {
@@ -75,9 +133,6 @@ const localOCR = {
         return this.filesUrls.length;
     }
 }
-
-
-const preprocessor = localOCR;
 
 const bucketName = "studyquick-gpt-4-ocr";
 
@@ -119,43 +174,44 @@ async function getContents(gcsUri) {
 }
 
 async function deleteFile(gcsUri) {
-    await storage.bucket(bucketName).file(gcsUri).delete(deleteOptions);
+    await storage.bucket(bucketName).file(gcsUri).delete();
 }
 
 //`gs://${bucketName}/${fileName}`
-async function getText(gcsSourceUri) {
-    const gcsDestinationUri = gcsSourceUri + ".ocr.json";
+// async function getText(gcsSourceUri) {
+//     const gcsDestinationUri = gcsSourceUri + ".ocr.json";
 
-    const inputConfig = {
-        mimeType: 'application/pdf',
-        gcsSource: {
-            uri: gcsSourceUri,
-        },
-    };
+//     const inputConfig = {
+//         mimeType: 'application/pdf',
+//         gcsSource: {
+//             uri: gcsSourceUri,
+//         },
+//     };
 
-    const outputConfig = {
-        gcsDestination: {
-            uri: gcsDestinationUri,
-        },
-    };
+//     const outputConfig = {
+//         gcsDestination: {
+//             uri: gcsDestinationUri,
+//         },
+//     };
 
-    const features = [{type: 'DOCUMENT_TEXT_DETECTION'}];
-    const request = {
-        requests: [
-            {
-                inputConfig: inputConfig,
-                features: features,
-                outputConfig: outputConfig,
-            },
-        ],
-    };
+//     const features = [{type: 'DOCUMENT_TEXT_DETECTION'}];
+//     const request = {
+//         requests: [
+//             {
+//                 inputConfig: inputConfig,
+//                 features: features,
+//                 outputConfig: outputConfig,
+//             },
+//         ],
+//     };
 
-    const [operation] = await client.asyncBatchAnnotateFiles(request);
-    const [filesResponse] = await operation.promise();
-    const destinationUri = filesResponse.responses[0].outputConfig.gcsDestination.uri;
+//     const [operation] = await client.asyncBatchAnnotateFiles(request);
+//     const [filesResponse] = await operation.promise();
+//     const destinationUri = filesResponse.responses[0].outputConfig.gcsDestination.uri;
+//     console.log(filesResponse.responses[0].outputConfig.gcsDestination.uri);
 
-    return destinationUri;
-}
+//     return destinationUri;
+// }
 
 function splitTextByNewline(text, chunkLen) {
     const chunks = [];
@@ -232,12 +288,17 @@ require('yargs')
             default: './study-material'
         }).option('prompts', {
             alias: 'p',
-            type: 'string',
+            type: 'boolean',
             description: 'saves prompts instead of evaluating them',
-            default: './study-material'
+            default: false,
+        }).option('gcp', {
+            alias: 'g',
+            type: 'boolean',
+            description: 'uses gcp ocr instead of local pdf parsing',
+            default: false,
         })
     }, async (argv) => {
-        await main(argv.files, argv.output, argv.prompts, preprocessor);
+        await main(argv.files, argv.output, argv.prompts, argv.gcp ? googleOCRPreprocess : localOCRPreprocess);
     })
     .strictCommands()
     .demandCommand(1)
