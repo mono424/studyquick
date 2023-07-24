@@ -251,7 +251,7 @@ async function main(files, output, prompts, flashcardCount, preprocessor) {
 
     for(let fileIndex = 0; fileIndex < preprocessor.length(); fileIndex++) {
         const {filename, content} = await preprocessor.getInfo(fileIndex);
-        textchunks = splitTextByNewline(content, 35000);
+        textchunks = splitTextByNewline(content, 10000);
 
         console.log(`Generating summary for ${filename}, containing ${textchunks.length} chunks ...`);
         let i = 0;
