@@ -39,6 +39,15 @@ const googleOCRPreprocess = {
         console.log(`All texts are ready.`);
     },
 
+    async hasFiles(prefix) {
+        const query = {
+            prefix,
+        };
+
+        const [files] = await storage.bucket(bucketName).getFiles(query);
+        return files.length > 0;
+    },
+
     async getInfo(index) {
         const {prefix, filename} = this.filesUrls[index];
         const query = {
@@ -73,6 +82,10 @@ const googleOCRPreprocess = {
         const name = `projects/${process.env.GOOGLE_STORAGE_PROJECT_ID}/locations/us/processors/${processorId}`;
         const prefixName = `${filename}__ocr`;
         const outputPrefix = `gs://${bucketName}/${prefixName}`;
+
+        if (this.hasFiles(prefixName)) {
+            return prefixName;
+        }
 
         const request = {
             name,
