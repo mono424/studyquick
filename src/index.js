@@ -241,7 +241,7 @@ function splitTextByNewline(text, chunkLen) {
     return chunks;
 }
 
-async function main(files, output, prompts, flashcardCount, preprocessor) {
+async function main(files, output, promptsOnly, flashcardCount, preprocessor) {
     const { ChatGPTAPI } = await import('chatgpt')
 
     const api = new ChatGPTAPI({
@@ -252,13 +252,22 @@ async function main(files, output, prompts, flashcardCount, preprocessor) {
     })
 
     output = path.resolve(output);
+    promptOutput = path.resolve(output, "prompts");
 
     if (!fs.existsSync(output)) {
         fs.mkdirSync(output);
-        console.log('Directory created successfully.');
+        console.log(`Directory ${output} created successfully.`);
     } else {
-        console.log('Directory already exists.');
+        console.log(`Directory ${output} already exists.`);
     }
+
+    if (!fs.existsSync(promptOutput)) {
+        fs.mkdirSync(promptOutput);
+        console.log(`Directory ${promptOutput} created successfully.`);
+    } else {
+        console.log(`Directory ${promptOutput} already exists.`);
+    }
+
 
     await preprocessor.preprocess(files);
 
@@ -271,22 +280,27 @@ async function main(files, output, prompts, flashcardCount, preprocessor) {
         for (let chunk of textchunks) {
             console.log(`Chunk ${++i}/${textchunks.length} ...`)
 
+            const promptOutputSummary = path.resolve(output, filename.replace(/\.pdf$/, "") + `.summary_${i}.md`);
+            const promptOutputCards = path.resolve(output, filename.replace(/\.pdf$/, "") + `.cards_${i}.md`);
+
+            const summaryPrompt = summaryPrompt(i, textchunks.length, chunk);
+            const cardsPrompt = cardsPrompt(flashcardCount);
+
+            fs.writeFileSync(promptOutputSummary, summaryPrompt);
+            fs.writeFileSync(promptOutputCards, cardsPrompt);
+
+            if (promptsOnly) {
+                continue;
+            }
+
             const outputSummary = path.resolve(output, filename.replace(/\.pdf$/, "") + `.summary_${i}.md`);
             const outputCards = path.resolve(output, filename.replace(/\.pdf$/, "") + `.cards_${i}.md`);
-
-            let res = prompts ? {
-                text: summaryPrompt(i, textchunks.length, chunk),
-            } : await api.sendMessage(summaryPrompt(chunk));
+            
+            let res = await api.sendMessage(summaryPrompt(i, textchunks.length, chunk))
             fs.writeFileSync(outputSummary, res.text);
 
-            res = prompts ? {
-                text: cardsPrompt(),
-            } : await api.sendMessage(cardsPrompt(flashcardCount), {
-                parentMessageId: res.id
-            });
+            res = api.sendMessage(cardsPrompt(flashcardCount), { parentMessageId: res.id });
             fs.writeFileSync(outputCards, res.text);
-
-            console.log(`Chunk ${i} done.`)
         }
     }
 }
@@ -300,10 +314,10 @@ require('yargs')
             type: 'string',
             description: 'output folder',
             default: './study-material'
-        }).option('prompts', {
+        }).option('promptsOnly', {
             alias: 'p',
             type: 'boolean',
-            description: 'saves prompts instead of evaluating them',
+            description: 'saves prompts only instead of evaluating them',
             default: false,
         }).option('gcp', {
             alias: 'g',
@@ -317,7 +331,7 @@ require('yargs')
             default: "25",
         })
     }, async (argv) => {
-        await main(argv.files, argv.output, argv.prompts, argv.flashcards, argv.gcp ? googleOCRPreprocess : localOCRPreprocess);
+        await main(argv.files, argv.output, argv.promptsOnly, argv.flashcards, argv.gcp ? googleOCRPreprocess : localOCRPreprocess);
     })
     .strictCommands()
     .demandCommand(1)
