@@ -280,8 +280,8 @@ async function main(files, output, promptsOnly, flashcardCount, preprocessor) {
         for (let chunk of textchunks) {
             console.log(`Chunk ${++i}/${textchunks.length} ...`)
 
-            const promptOutputSummary = path.resolve(output, filename.replace(/\.pdf$/, "") + `.summary_${i}.md`);
-            const promptOutputCards = path.resolve(output, filename.replace(/\.pdf$/, "") + `.cards_${i}.md`);
+            const promptOutputSummary = path.resolve(promptOutput, filename.replace(/\.pdf$/, "") + `.summary_${i}.prompt`);
+            const promptOutputCards = path.resolve(promptOutput, filename.replace(/\.pdf$/, "") + `.cards_${i}.prompt`);
 
             const summaryPrompt = summaryPrompt(i, textchunks.length, chunk);
             const cardsPrompt = cardsPrompt(flashcardCount);
